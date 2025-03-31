@@ -4,4 +4,4 @@ project(Paral_DZ)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
 
-add_executable(lab1 lab1.cpp)
+add_executable(lab3 lab3.cpp)
