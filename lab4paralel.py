@@ -24,7 +24,7 @@ class SensorX(Sensor):
 
 
 class SensorCam(Sensor):
-    def __init__(self, camera_name, resolution=(640, 480)):
+    def __init__(self, camera_name, resolution=(1280, 720)):
         self.camera_name = camera_name
         self.resolution = resolution
         self.cap = cv2.VideoCapture(camera_name)
@@ -88,33 +88,33 @@ def sensor_worker(sensor, queue_sensor, stop_event):
         queue_sensor.put(data)
 
 
-# --- Основная программа ---
+
 def main(camera_name, resolution, display_frequency):
     cam_sensor = SensorCam(camera_name, resolution)
 
-    # Несколько сенсоров
+
     sensor0 = SensorX(0.01)
     sensor1 = SensorX(0.02)
     sensor2 = SensorX(0.04)
 
     window = WindowImage(display_frequency)
 
-    # Очереди для сенсоров
+
     sensor0_queue = queue.Queue()
     sensor1_queue = queue.Queue()
     sensor2_queue = queue.Queue()
 
-    # Флаг остановки
+
     stop_event = threading.Event()
 
-    # Потоки для сенсоров
+
     sensor_threads = [
         threading.Thread(target=sensor_worker, args=(sensor0, sensor0_queue, stop_event)),
         threading.Thread(target=sensor_worker, args=(sensor1, sensor1_queue, stop_event)),
         threading.Thread(target=sensor_worker, args=(sensor2, sensor2_queue, stop_event)),
     ]
 
-    # Запуск потоков
+
     for thread in sensor_threads:
         thread.start()
 
@@ -125,15 +125,15 @@ def main(camera_name, resolution, display_frequency):
             if cam_data is not None:
                 img = cam_data.copy()
 
-                # Проверяем и получаем данные от каждого сенсора
+
                 sensor0_data = sensor0_queue.get() if not sensor0_queue.empty() else 0
                 sensor1_data = sensor1_queue.get() if not sensor1_queue.empty() else 0
                 sensor2_data = sensor2_queue.get() if not sensor2_queue.empty() else 0
 
-                # Отображаем изображение и данные сенсоров
+
                 window.show(img, sensor0_data, sensor1_data, sensor2_data)
 
-            # Проверка нажатия 'q'
+
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 logging.info("Нажата клавиша 'q', завершение программы")
                 break
@@ -158,7 +158,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Управление сенсорами")
     parser.add_argument('camera_name', help="Имя камеры в системе (например, 0)")
-    parser.add_argument('--resolution', type=str, default='640x480', help="Разрешение камеры")
+    parser.add_argument('--resolution', type=str, default='1280x720', help="Разрешение камеры")
     parser.add_argument('--display_frequency', type=int, default=30, help="Частота обновления окна")
 
     args = parser.parse_args()
