@@ -86,10 +86,9 @@ def sensor_worker(sensor, queue_sensor, stop_event, lock, sync_interval=0.1):
                 queue_sensor.get_nowait()
             queue_sensor.put((data, timestamp))
 
-
         time_to_wait = sync_interval - (time.time() - last_time)
         if time_to_wait > 0:
-            pass
+            time.sleep(time_to_wait)
         last_time = time.time()
 
 
@@ -110,6 +109,7 @@ def main(camera_name, resolution, display_frequency):
 
     window = WindowImage(display_frequency)
 
+    cam_queue = queue.Queue(maxsize=1)
     sensor0_queue = queue.Queue(maxsize=1)
     sensor1_queue = queue.Queue(maxsize=1)
     sensor2_queue = queue.Queue(maxsize=1)
@@ -118,6 +118,7 @@ def main(camera_name, resolution, display_frequency):
     lock = threading.Lock()
 
     sensor_threads = [
+        threading.Thread(target=sensor_worker, args=(cam_sensor, cam_queue, stop_event, lock), daemon=True),
         threading.Thread(target=sensor_worker, args=(sensor0, sensor0_queue, stop_event, lock), daemon=True),
         threading.Thread(target=sensor_worker, args=(sensor1, sensor1_queue, stop_event, lock), daemon=True),
         threading.Thread(target=sensor_worker, args=(sensor2, sensor2_queue, stop_event, lock), daemon=True),
@@ -126,19 +127,16 @@ def main(camera_name, resolution, display_frequency):
     for thread in sensor_threads:
         thread.start()
 
-
     sensor0_data = 0
     sensor1_data = 0
     sensor2_data = 0
 
     try:
         while True:
-            cam_data = cam_sensor.get()
+            cam_data = try_get_new_data(cam_queue, None)
 
             if cam_data is not None:
                 img = cam_data.copy()
-
-
                 sensor0_data = try_get_new_data(sensor0_queue, sensor0_data)
                 sensor1_data = try_get_new_data(sensor1_queue, sensor1_data)
                 sensor2_data = try_get_new_data(sensor2_queue, sensor2_data)
@@ -163,6 +161,11 @@ def main(camera_name, resolution, display_frequency):
 
 if __name__ == "__main__":
     import argparse
+    import os
+
+    os.makedirs("log", exist_ok=True)
+    logging.basicConfig(filename='log/app.log', level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
 
     parser = argparse.ArgumentParser(description="Управление сенсорами")
     parser.add_argument('camera_name', help="Имя камеры в системе (например, 0)")
@@ -172,8 +175,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     resolution = tuple(map(int, args.resolution.split('x')))
     main(int(args.camera_name), resolution, args.display_frequency)
-
-
-
-logging.basicConfig(filename='log/app.log', level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
