@@ -89,7 +89,7 @@ def sensor_worker(sensor, queue_sensor, stop_event, lock, sync_interval=0.1):
 
         time_to_wait = sync_interval - (time.time() - last_time)
         if time_to_wait > 0:
-            time.sleep(time_to_wait)
+            pass
         last_time = time.time()
 
 
