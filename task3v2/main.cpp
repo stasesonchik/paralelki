@@ -28,9 +28,9 @@ std::vector<double> simple_iteration(const std::vector<std::vector<double>>& A,
 
     #pragma omp parallel num_threads(num_threads)
     {
-        // Обе части алгоритма теперь внутри одной параллельной секции
+        
         while (Ax_norm > EPS) {
-            // Параллельный расчёт Ax
+            
             if (schedule_type == "static") {
                 #pragma omp for schedule(static)
                 for (int i = 0; i < matrix_size; i++) {
@@ -57,13 +57,13 @@ std::vector<double> simple_iteration(const std::vector<std::vector<double>>& A,
                 }
             }
 
-            // Параллельное обновление x
+            
             #pragma omp for
             for (int i = 0; i < matrix_size; i++) {
                 x[i] = x[i] - TAU * (Ax[i] - b[i]);
             }
 
-            // Вычисление нормы Ax, выполняется одним потоком
+         
             #pragma omp single
             Ax_norm = euclid_norm(Ax, matrix_size);
         }
@@ -88,7 +88,7 @@ double run(const std::vector<std::vector<double>>& A,
            int matrix_size,
            int num_threads,
            const std::string& schedule_type) {
-    std::vector<double> x(matrix_size, 0.0);  // локальная копия
+    std::vector<double> x(matrix_size, 0.0);
 
     const auto start = std::chrono::steady_clock::now();
     simple_iteration(A, x, b, matrix_size, num_threads, schedule_type);
@@ -110,7 +110,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    int matrix_size = 40000;
+    int matrix_size = 65000;
     std::vector<std::vector<double>> A;
     std::vector<double> b;
 
