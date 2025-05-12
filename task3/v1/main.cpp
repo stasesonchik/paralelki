@@ -4,8 +4,6 @@
 #include <omp.h>
 #include <chrono>
 #include <string>
-#include <map>
-
 
 #define TAU 0.01
 #define EPS 0.0001
@@ -13,26 +11,25 @@
 double euclid_norm(const std::vector<double>& vec, int N) {
     double norm = 0.0;
     for (int i = 0; i < N; i++) {
-        norm += pow(vec[i], 2.0);
+        norm += vec[i] * vec[i];
     }
     return sqrt(norm);
 }
 
-
-std::vector<double> simple_iteration(std::vector<std::vector<double>>& A,
-                                    std::vector<double>& x,
-                                    std::vector<double>& b,
-                                    int matrix_size,
-                                    int num_threads,
-                                    const std::string& schedule_type)
+std::vector<double> simple_iteration(const std::vector<std::vector<double>>& A,
+                                     std::vector<double> x,  // копия, чтобы исходный не менялся
+                                     const std::vector<double>& b,
+                                     int matrix_size,
+                                     int num_threads,
+                                     const std::string& schedule_type)
 {
     std::vector<double> Ax(matrix_size, 0.0);
-    double Ax_norm = EPS + 1; 
+    double Ax_norm = EPS + 1;
 
     #pragma omp parallel num_threads(num_threads)
     {
         while (Ax_norm > EPS) {
-  
+
             if (schedule_type == "static") {
                 #pragma omp for schedule(static)
                 for (int i = 0; i < matrix_size; i++) {
@@ -61,13 +58,11 @@ std::vector<double> simple_iteration(std::vector<std::vector<double>>& A,
                 }
             }
 
-  
             #pragma omp for
             for (int i = 0; i < matrix_size; i++) {
                 x[i] = x[i] - TAU * (Ax[i] - b[i]);
             }
 
-     
             #pragma omp single
             Ax_norm = euclid_norm(Ax, matrix_size);
         }
@@ -76,52 +71,53 @@ std::vector<double> simple_iteration(std::vector<std::vector<double>>& A,
     return x;
 }
 
-double run(int matrix_size, int num_threads, const std::string& schedule_type) {
-    std::vector<std::vector<double>> A(matrix_size, std::vector<double>(matrix_size, 1.0));
-    std::vector<double> x(matrix_size, 0.0);  
-    std::vector<double> b(matrix_size, matrix_size + 1);  
+double run(const std::vector<std::vector<double>>& A,
+           const std::vector<double>& b,
+           int matrix_size,
+           int num_threads,
+           const std::string& schedule_type)
+{
+    std::vector<double> x(matrix_size, 0.0);  // локальная копия x
 
-    for (int i = 0; i < matrix_size; i++) {
-        A[i][i] = 2.0;  
-    }
-
-    const auto start = std::chrono::steady_clock::now();
+    auto start = std::chrono::steady_clock::now();
     x = simple_iteration(A, x, b, matrix_size, num_threads, schedule_type);
-    const auto end = std::chrono::steady_clock::now();
-    const std::chrono::duration<double> elapsed_seconds = end - start;
+    auto end = std::chrono::steady_clock::now();
 
+    std::chrono::duration<double> elapsed_seconds = end - start;
     return elapsed_seconds.count();
 }
 
 int main(int argc, char* argv[]) {
-    
+
     if (argc != 2) {
         std::cout << "Usage: " << argv[0] << " <schedule_type>\n";
-        std::cout << "Valid options for <schedule_type>: static, dynamic, guided\n";
+        std::cout << "Valid options: static, dynamic, guided\n";
         return 1;
     }
-
 
     std::string schedule_type = argv[1];
-
-
     if (schedule_type != "static" && schedule_type != "dynamic" && schedule_type != "guided") {
-        std::cout << "Invalid schedule type. Valid options are: static, dynamic, guided.\n";
+        std::cerr << "Invalid schedule type. Valid options: static, dynamic, guided\n";
         return 1;
     }
 
-    int matrix_size = 40000; 
-    double tserial, tparallel;
+    int matrix_size = 40000;
 
+    // Инициализация A и b один раз
+    std::vector<std::vector<double>> A(matrix_size, std::vector<double>(matrix_size, 1.0));
+    std::vector<double> b(matrix_size, matrix_size + 1);
 
-    tserial = run(matrix_size, 1, schedule_type);
+    for (int i = 0; i < matrix_size; i++) {
+        A[i][i] = 2.0;
+    }
+
+    double tserial = run(A, b, matrix_size, 1, schedule_type);
     std::cout << "Elapsed time (serial): " << tserial << " seconds\n";
 
-
-    std::vector<int> thread_counts = {2, 4, 8, 16, 20, 40};  
+    std::vector<int> thread_counts = {2, 4, 8, 16, 20, 40};
 
     for (int threads : thread_counts) {
-        tparallel = run(matrix_size, threads, schedule_type);
+        double tparallel = run(A, b, matrix_size, threads, schedule_type);
         std::cout << " Threads: " << threads
                   << " | Time: " << tparallel
                   << " | Speedup: " << tserial / tparallel << "\n";
