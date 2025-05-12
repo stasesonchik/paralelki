@@ -5,7 +5,6 @@
 #include <chrono>
 #include <string>
 
-
 #define TAU 0.01
 #define EPS 0.0001
 
@@ -29,7 +28,9 @@ std::vector<double> simple_iteration(const std::vector<std::vector<double>>& A,
 
     #pragma omp parallel num_threads(num_threads)
     {
+        // Обе части алгоритма теперь внутри одной параллельной секции
         while (Ax_norm > EPS) {
+            // Параллельный расчёт Ax
             if (schedule_type == "static") {
                 #pragma omp for schedule(static)
                 for (int i = 0; i < matrix_size; i++) {
@@ -56,11 +57,13 @@ std::vector<double> simple_iteration(const std::vector<std::vector<double>>& A,
                 }
             }
 
+            // Параллельное обновление x
             #pragma omp for
             for (int i = 0; i < matrix_size; i++) {
                 x[i] = x[i] - TAU * (Ax[i] - b[i]);
             }
 
+            // Вычисление нормы Ax, выполняется одним потоком
             #pragma omp single
             Ax_norm = euclid_norm(Ax, matrix_size);
         }
