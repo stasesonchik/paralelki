@@ -23,7 +23,7 @@ void print_arrays(double *a, double *b, int n, int m)
     std::cout << std::endl;
 }
 
-// Параллельная инициализация
+
 void init_arrays(std::vector<double>& matrix, std::vector<double>& vector, int n, int threads)
 {
     int rows_per_thread = n / threads;
@@ -57,10 +57,10 @@ VT_pair run_serial(int n)
 
     auto start = std::chrono::steady_clock::now();
 
-    // Инициализация
+
     init_arrays(matrix, vector, n, 1);
 
-    // Перемножение
+
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             res[i] += matrix[i * n + j] * vector[j];
@@ -83,7 +83,7 @@ void matrix_vector_product_row(const double* a, const double* b, double* c, int 
     }
 }
 
-// Параллельный запуск + параллельная инициализация
+
 VT_pair run_parallel(int n, int THREADS)
 {
     std::vector<double> matrix(n * n);
@@ -121,7 +121,7 @@ void Matrix_multipletion(int N)
 
     std::vector<double> matrix(N * N);
     std::vector<double> vector(N);
-    init_arrays(matrix, vector, N, 8);  // Инициализация для serial версии
+    init_arrays(matrix, vector, N, 8);  
 
     std::cout << "N - " << N << "\n";
 
