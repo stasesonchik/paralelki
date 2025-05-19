@@ -45,7 +45,6 @@ void init_arrays(std::vector<double>& matrix, std::vector<double>& vector, int n
     for (auto& thread : thread_pool)
         thread.join();
 
-    // Вектор можно инициализировать последовательно (незначительная нагрузка)
     for (int i = 0; i < n; ++i)
         vector[i] = i;
 }
