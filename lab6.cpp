@@ -3,26 +3,31 @@
 #include <cmath>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <boost/program_options.hpp>
 
-// =============================
-// ПАРАМЕТРЫ
-// =============================
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 struct Options {
     int N;
     double tol;
     long maxIter;
+    std::string device;
 };
 
-Options parseOptions(int argc, char** argv) {
+Options parseOptions(int argc, char** argv, bool& run_single_solver) {
     namespace po = boost::program_options;
     Options opt;
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "show help")
+        ("run-single", "run single simulation with parameters")
         ("size", po::value<int>(&opt.N)->default_value(128))
         ("tol", po::value<double>(&opt.tol)->default_value(1e-6))
-        ("max-iter", po::value<long>(&opt.maxIter)->default_value(1000000));
+        ("max-iter", po::value<long>(&opt.maxIter)->default_value(1000000))
+        ("device", po::value<std::string>(&opt.device)->default_value("gpu"), "device to use: cpu or gpu");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -30,102 +35,147 @@ Options parseOptions(int argc, char** argv) {
         std::cout << desc << "\n";
         std::exit(0);
     }
+    run_single_solver = vm.count("run-single");
     po::notify(vm);
     return opt;
 }
 
-// =============================
-// ИНИЦИАЛИЗАЦИЯ
-// =============================
-void initInterior(double* __restrict A, int N) {
-    for (int j = 1; j < N - 1; ++j) {
-        double* row = A + j * N;
-        for (int i = 1; i < N - 1; ++i) {
-            row[i] = 0.0;
-        }
+void initBoundary(double* A, int N) {
+    const double tl = 10.0, tr = 20.0, br = 30.0, bl = 20.0;
+
+#pragma acc parallel loop
+    for (int i = 0; i < N; ++i) {
+        A[i] = tl + (tr - tl) * i / (N - 1);
+        A[(N - 1) * N + i] = bl + (br - bl) * i / (N - 1);
+    }
+
+#pragma acc parallel loop
+    for (int j = 0; j < N; ++j) {
+        A[j * N] = tl + (bl - tl) * j / (N - 1);
+        A[j * N + (N - 1)] = tr + (br - tr) * j / (N - 1);
     }
 }
 
-void initBoundary(double* __restrict A, int N) {
-    const double tl = 10.0;
-    const double tr = 20.0;
-    const double br = 30.0;
-    const double bl = 20.0;
-
-    for (int i = 0; i < N; ++i) {
-        A[i] = tl + (tr - tl) * static_cast<double>(i) / (N - 1);
-    }
-    for (int j = 0; j < N; ++j) {
-        A[j * N + (N - 1)] = tr + (br - tr) * static_cast<double>(j) / (N - 1);
-    }
-    for (int i = 0; i < N; ++i) {
-        A[(N - 1) * N + i] = bl + (br - bl) * static_cast<double>(i) / (N - 1);
-    }
-    for (int j = 0; j < N; ++j) {
-        A[j * N] = tl + (bl - tl) * static_cast<double>(j) / (N - 1);
-    }
+void initInterior(double* A, int N) {
+#pragma omp parallel for collapse(2)
+    for (int j = 1; j < N - 1; ++j)
+        for (int i = 1; i < N - 1; ++i)
+            A[j * N + i] = 0.0;
 }
 
-// =============================
-// ОСНОВНАЯ ИТЕРАЦИЯ
-// =============================
-double jacobiIteration(const double* __restrict A, double* __restrict Anew, int N) {
-    int NM = N * N;
+double simpleIterationCPU(double* A, double* Anew, int N) {
     double maxError = 0.0;
 
-    #pragma acc parallel loop collapse(2) present(A[0:NM], Anew[0:NM]) reduction(max:maxError)
+#pragma omp parallel for reduction(max:maxError)
     for (int j = 1; j < N - 1; ++j) {
         for (int i = 1; i < N - 1; ++i) {
             int idx = j * N + i;
-            double v = 0.25 * (A[idx-1] + A[idx+1] + A[idx+N] + A[idx-N]);
-            Anew[idx] = v;
-            double diff = std::fabs(v - A[idx]);
+            Anew[idx] = 0.25 * (A[idx - 1] + A[idx + 1] + A[idx - N] + A[idx + N]);
+            double diff = std::fabs(Anew[idx] - A[idx]);
+            if (diff > maxError) maxError = diff;
+        }
+    }
+
+    return maxError;
+}
+
+double simpleIterationGPU(double* A, double* Anew, int N) {
+    double maxError = 0.0;
+
+#pragma acc parallel loop collapse(2) reduction(max:maxError)
+    for (int j = 1; j < N - 1; ++j) {
+        for (int i = 1; i < N - 1; ++i) {
+            int idx = j * N + i;
+            Anew[idx] = 0.25 * (A[idx - 1] + A[idx + 1] + A[idx - N] + A[idx + N]);
+            double diff = std::fabs(Anew[idx] - A[idx]);
             if (diff > maxError) maxError = diff;
         }
     }
     return maxError;
 }
 
-void printSummary(long iter, double maxError) {
-    std::cout << "Iterations: " << iter << ", Max Error: " << maxError << "\n";
-}
-
-int main(int argc, char** argv) {
-    auto opt = parseOptions(argc, argv);
-    int N  = opt.N;
+void runSolverGPU(int N, double tol, long maxIter) {
     int NM = N * N;
-
-    double* A    = static_cast<double*>(aligned_alloc(64, NM * sizeof(double)));
+    double* A = static_cast<double*>(aligned_alloc(64, NM * sizeof(double)));
     double* Anew = static_cast<double*>(aligned_alloc(64, NM * sizeof(double)));
 
-    initBoundary(A,    N);
-    initBoundary(Anew, N);
-    initInterior(A,    N);
-    initInterior(Anew, N);
+#pragma acc data copy(A[0:NM]), create(Anew[0:NM])
+    {
+        initBoundary(A, N);
+        initInterior(A, N);
+#pragma acc parallel loop collapse(2)
+        for (int j = 0; j < N; ++j)
+            for (int i = 0; i < N; ++i)
+                Anew[j * N + i] = A[j * N + i];
+
+        long iter = 0;
+        double maxErr = 0.0;
+        auto t_start = std::chrono::high_resolution_clock::now();
+
+        do {
+            maxErr = simpleIterationGPU(A, Anew, N);
+#pragma acc parallel loop collapse(2)
+            for (int j = 1; j < N - 1; ++j)
+                for (int i = 1; i < N - 1; ++i)
+                    A[j * N + i] = Anew[j * N + i];
+            ++iter;
+        } while (maxErr > tol && iter < maxIter);
+
+        auto t_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = t_end - t_start;
+
+        std::cout << "Simple Iteration [OpenACC GPU] - Grid: " << N
+                  << ", Iterations: " << iter
+                  << ", Final Error: " << maxErr
+                  << ", Time: " << elapsed.count() << " sec\n";
+
+        if (N == 10 || N == 13) {
+#pragma acc update self(A[0:NM])
+            std::ofstream fout("simple_output_gpu.csv");
+            for (int j = 0; j < N; ++j) {
+                for (int i = 0; i < N; ++i) {
+                    fout << A[j * N + i];
+                    if (i < N - 1) fout << ",";
+                }
+                fout << "\n";
+            }
+            std::cout << "Matrix saved to simple_output_gpu.csv\n";
+        }
+    }
+
+    free(A);
+    free(Anew);
+}
+
+void runSolverCPU(int N, double tol, long maxIter) {
+    int NM = N * N;
+    double* A = static_cast<double*>(aligned_alloc(64, NM * sizeof(double)));
+    double* Anew = static_cast<double*>(aligned_alloc(64, NM * sizeof(double)));
+
+    initBoundary(A, N);
+    initInterior(A, N);
+    std::memcpy(Anew, A, NM * sizeof(double));
 
     long iter = 0;
     double maxErr = 0.0;
-
     auto t_start = std::chrono::high_resolution_clock::now();
 
-    #pragma acc data copy(A[0:NM]) copy(Anew[0:NM])
-    {
-        do {
-            maxErr = jacobiIteration(A, Anew, N);
-            std::swap(A, Anew);
-            ++iter;
-            if (N <= 20) std::cout << "Iteration " << iter << ": maxError = " << maxErr << std::endl;
-        } while (maxErr > opt.tol && iter < opt.maxIter);
-    }
+    do {
+        maxErr = simpleIterationCPU(A, Anew, N);
+        std::swap(A, Anew);
+        ++iter;
+    } while (maxErr > tol && iter < maxIter);
 
     auto t_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = t_end - t_start;
 
-    printSummary(iter, maxErr);
-    std::cout << "Elapsed time: " << elapsed.count() << " sec\n";
+    std::cout << "Grid: " << N
+              << ", Iterations: " << iter
+              << ", Final Error: " << maxErr
+              << ", Time: " << elapsed.count() << " sec\n";
 
     if (N == 10 || N == 13) {
-        std::ofstream fout("matrix_output.csv");
+        std::ofstream fout("simple_output_cpu.csv");
         for (int j = 0; j < N; ++j) {
             for (int i = 0; i < N; ++i) {
                 fout << A[j * N + i];
@@ -133,10 +183,41 @@ int main(int argc, char** argv) {
             }
             fout << "\n";
         }
-        std::cout << "Matrix saved to matrix_output.csv\n";
+        std::cout << "Matrix saved to simple_output_cpu.csv\n";
     }
 
     free(A);
     free(Anew);
+}
+
+void runBenchmarks(double tol, long maxIter) {
+    std::cout << "===== GPU Benchmarks (OpenACC Simple Iteration) =====\n";
+    for (int N : {128, 256, 512, 1024}) {
+        runSolverGPU(N, tol, maxIter);
+    }
+
+    std::cout << "\n===== CPU Benchmarks (OpenMP Simple Iteration) =====\n";
+    for (int N : {128, 256, 512, 1024}) {
+        runSolverCPU(N, tol, maxIter);
+    }
+}
+
+int main(int argc, char** argv) {
+    bool run_single_solver = false;
+    Options opt = parseOptions(argc, argv, run_single_solver);
+
+    if (run_single_solver) {
+        if (opt.device == "gpu")
+            runSolverGPU(opt.N, opt.tol, opt.maxIter);
+        else if (opt.device == "cpu")
+            runSolverCPU(opt.N, opt.tol, opt.maxIter);
+        else {
+            std::cerr << "Invalid device: " << opt.device << ". Use --device=gpu or --device=cpu\n";
+            return 1;
+        }
+    } else {
+        runBenchmarks(opt.tol, opt.maxIter);
+    }
+
     return 0;
 }
