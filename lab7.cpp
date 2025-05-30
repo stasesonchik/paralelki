@@ -19,7 +19,7 @@ double linearInterpolation(double x, double x1, double y1, double x2, double y2)
 void saveMatrixToFile(const std::vector<double>& matrix, int size, const std::string& filename) {
     std::ofstream out(filename);
     if (!out) {
-        std::cerr << "Не могу открыть файл " << filename << " — возможно, он заблокирован или ты что-то напортачил.\n";
+        std::cerr << "Не могу открыть файл " << filename << "\n";
         return;
     }
     for (int i = 0; i < size; ++i) {
@@ -56,10 +56,10 @@ int main(int argc, char* argv[]) {
 
     opt::options_description desc("Опции");
     desc.add_options()
-        ("accuracy", opt::value<double>()->default_value(1e-6), "Желаемая точность (чем меньше — тем дольше мучиться)")
-        ("size", opt::value<int>()->default_value(1024), "Размер квадратной матрицы (1024 — не меньше, чтобы почувствовать мощь)")
-        ("iterations", opt::value<int>()->default_value(1000000), "Максимальное число итераций (1000000 — чтоб успел посчитать)")
-        ("help", "Вывести эту справку и убежать");
+        ("accuracy", opt::value<double>()->default_value(1e-6), "Желаемая точность ")
+        ("size", opt::value<int>()->default_value(1024), "Размер квадратной матрицы")
+        ("iterations", opt::value<int>()->default_value(1000000), "Максимальное число итераций ")
+        ("help", "это хелп");
 
     opt::variables_map vm;
     opt::store(opt::parse_command_line(argc, argv, desc), vm);
@@ -93,7 +93,7 @@ int main(int argc, char* argv[]) {
 
     cublasHandle_t handle;
     if (cublasCreate(&handle) != CUBLAS_STATUS_SUCCESS) {
-        std::cerr << "cublasCreate — пиздец, не запустился\n";
+        std::cerr << "cublasCreate — не запустился\n";
         return EXIT_FAILURE;
     }
 
@@ -138,7 +138,7 @@ int main(int argc, char* argv[]) {
                 {
                     if (maxIdx > 0 && maxIdx <= matrixSize * matrixSize) {
                         if (cublasGetVector(1, sizeof(double), diffDevice + (maxIdx - 1), 1, &host_error, 1) != CUBLAS_STATUS_SUCCESS) {
-                            std::cerr << "cublasGetVector — идиотизм с индексом\n";
+                            std::cerr << "cublasGetVector - проблемы м с индексом\n";
                             cublasDestroy(handle);
                             return EXIT_FAILURE;
                         }
